@@ -121,3 +121,12 @@ WebP encoding errors now include a description
 
 When libwebp fails to encode an image, the raised :py:exc:`ValueError` now
 consistently describes the error rather than only reporting a numeric code.
+
+
+Match 16-bit RGB PNG transparency before reducing color depth
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+16-bit truecolor PNG files with a tRNS transparency key now decode as RGBA,
+comparing the original 16-bit channel values before downsampling their colors
+to 8 bits. This avoids making the wrong pixel transparent when two original
+colors share either the high or low byte of a channel.

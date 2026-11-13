@@ -416,6 +416,7 @@ class PngStream(ChunkStream):
         self.im_palette: tuple[str, bytes] | None = None
         self.im_custom_mimetype: str | None = None
         self.im_n_frames: int | None = None
+        self.im_trns16_rgb: tuple[int, int, int] | None = None
         self._seq_num: int | None = None
         self.rewind_state = _RewindState({}, [], None)
 
@@ -548,7 +549,14 @@ class PngStream(ChunkStream):
                     value = int(min(1, value / max_value) * 255)
                 self.im_info["transparency"] = value
             elif self.im_mode == "RGB":
-                self.im_info["transparency"] = i16(s), i16(s, 2), i16(s, 4)
+                key = i16(s), i16(s, 2), i16(s, 4)
+                if self.im_rawmode == "RGB;16B":
+                    # Keep the full 16-bit key until the decoder creates alpha.
+                    # Comparing only decoded 8-bit RGB loses low-byte differences.
+                    self.im_mode = "RGBA"
+                    self.im_trns16_rgb = key
+                else:
+                    self.im_info["transparency"] = key
         return s
 
     def chunk_gAMA(self, pos: int, length: int) -> bytes:
@@ -1020,7 +1028,12 @@ class PngImageFile(ImageFile.ImageFile):
     def load_prepare(self) -> None:
         """internal: prepare to read PNG file"""
 
-        if self.info.get("interlace"):
+        if self.png is not None and self.png.im_trns16_rgb is not None:
+            self.decoderconfig = (
+                int(bool(self.info.get("interlace"))),
+                *self.png.im_trns16_rgb,
+            )
+        elif self.info.get("interlace"):
             self.decoderconfig = self.decoderconfig + (1,)
 
         self.__idat = self.__prepare_idat  # used by load_read()
