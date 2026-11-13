@@ -56,6 +56,56 @@ def test_rgba_quantize() -> None:
     assert image.quantize().convert().mode == "RGBA"
 
 
+@pytest.mark.parametrize("colors", [16, 64, 128, 256])
+def test_rgba_fast_octree_alpha_gradients(colors: int) -> None:
+    """Quantizing a few RGB colors must not discard most alpha levels."""
+    base_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]
+    image = Image.new("RGBA", (128, len(base_colors)))
+    image.putdata([(*color, alpha) for color in base_colors for alpha in range(128)])
+
+    quantized = image.quantize(colors=colors, method=Image.Quantize.FASTOCTREE)
+    assert quantized.mode == "P"
+    assert len(set(quantized.tobytes())) == colors
+
+
+def test_rgba_fast_octree_many_rgb_channel_values() -> None:
+    """A handful of colors with varied channels still needs alpha detail."""
+    base_colors = [
+        ((i * 31 + 1) % 256, (i * 47 + 5) % 256, (i * 59 + 7) % 256) for i in range(8)
+    ]
+    image = Image.new("RGBA", (128, len(base_colors)))
+    image.putdata([(*color, alpha) for color in base_colors for alpha in range(128)])
+    quantized = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+    assert len(set(quantized.tobytes())) >= 128
+
+
+def test_rgba_fast_octree_non_power_of_two_colors() -> None:
+    """Use nearly all palette entries even with five distinct RGB colors."""
+    base_colors = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (255, 0, 255),
+    ]
+    image = Image.new("RGBA", (256, len(base_colors)))
+    image.putdata([(*color, alpha) for color in base_colors for alpha in range(256)])
+    quantized = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+    assert len(set(quantized.tobytes())) >= 250
+
+
+def test_rgba_fast_octree_alpha_accuracy() -> None:
+    """An alpha gradient should not have abrupt coarse palette regions."""
+    base_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]
+    image = Image.new("RGBA", (256, len(base_colors)))
+    image.putdata([(*color, alpha) for color in base_colors for alpha in range(256)])
+    quantized = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+    result = quantized.convert("RGBA").getchannel("A")
+    original = image.getchannel("A")
+    error = sum(abs(a - b) for a, b in zip(original.tobytes(), result.tobytes()))
+    assert error / (image.width * image.height) <= 2
+
+
 def test_quantize() -> None:
     with Image.open("Tests/images/caption_6_33_22.png") as image:
         converted = image.convert("RGB")

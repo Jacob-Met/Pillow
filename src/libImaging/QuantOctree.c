@@ -379,6 +379,125 @@ map_image_pixels(
 const unsigned int CUBE_LEVELS[8] = {4, 4, 4, 0, 2, 2, 2, 0};
 const unsigned int CUBE_LEVELS_ALPHA[8] = {3, 4, 3, 3, 2, 2, 2, 2};
 
+/*
+An RGBA image may have only a few distinct RGB colors but hundreds of alpha
+levels.  A fixed four-dimensional octree then uses most of its buckets on
+unneeded RGB precision, reducing alpha to a few steps.  Such images can be
+quantized more accurately by keeping each RGB color and dividing its alpha
+range into equally sized buckets.  Other images keep the normal octree path.
+
+Returns 1 if quantized, 0 if this case does not apply, and -1 on allocation
+failure.
+*/
+static int
+quantize_sparse_rgba(
+    Pixel *pixelData,
+    uint32_t nPixels,
+    uint32_t nQuantPixels,
+    Pixel **palette,
+    uint32_t *paletteLength,
+    uint32_t **quantizedPixels
+) {
+    uint32_t rgbKeys[256];
+    unsigned int rgbIDs[256];
+    unsigned int alphaMin[64], alphaMax[64];
+    unsigned char alphaSeen[256] = {0};
+    unsigned int rgbCount = 0, alphaCount = 0;
+    unsigned int alphaBuckets;
+    ColorBucket buckets = NULL;
+    Pixel *colors = NULL;
+    uint32_t *indices = NULL;
+    uint32_t i;
+
+    if (!nPixels || nQuantPixels < 2) {
+        return 0;
+    }
+
+    for (i = 0; i < 256; i++) {
+        rgbKeys[i] = UINT32_MAX;
+    }
+
+    for (i = 0; i < nPixels; i++) {
+        Pixel *p = &pixelData[i];
+        uint32_t rgb = ((uint32_t)p->c.r << 16) | ((uint32_t)p->c.g << 8) | p->c.b;
+        unsigned int pos = (rgb * 2654435761U) & 255U;
+        unsigned int id;
+
+        while (rgbKeys[pos] != UINT32_MAX && rgbKeys[pos] != rgb) {
+            pos = (pos + 1) & 255U;
+        }
+        if (rgbKeys[pos] == UINT32_MAX) {
+            if (rgbCount >= 64 || rgbCount >= nQuantPixels) {
+                return 0;
+            }
+            rgbKeys[pos] = rgb;
+            rgbIDs[pos] = rgbCount;
+            alphaMin[rgbCount] = 255;
+            alphaMax[rgbCount] = 0;
+            rgbCount++;
+        }
+        id = rgbIDs[pos];
+        alphaMin[id] = MIN(alphaMin[id], p->c.a);
+        alphaMax[id] = MAX(alphaMax[id], p->c.a);
+
+        if (!alphaSeen[p->c.a]) {
+            alphaSeen[p->c.a] = 1;
+            alphaCount++;
+        }
+    }
+    if (alphaCount <= 8) {
+        return 0;
+    }
+
+    alphaBuckets = nQuantPixels / rgbCount;
+
+    /* malloc check ok, bounded by nQuantPixels (maximum 256) */
+    buckets = calloc(nQuantPixels, sizeof(struct _ColorBucket));
+    colors = calloc(nQuantPixels, sizeof(Pixel));
+    /* malloc check ok, calloc + overflow protection */
+    indices = calloc(nPixels, sizeof(uint32_t));
+    if (!buckets || !colors || !indices) {
+        free(buckets);
+        free(colors);
+        free(indices);
+        return -1;
+    }
+
+    for (i = 0; i < nPixels; i++) {
+        Pixel *p = &pixelData[i];
+        uint32_t rgb = ((uint32_t)p->c.r << 16) | ((uint32_t)p->c.g << 8) | p->c.b;
+        unsigned int pos = (rgb * 2654435761U) & 255U;
+        unsigned int id, alpha, entry;
+        ColorBucket bucket;
+
+        while (rgbKeys[pos] != rgb) {
+            pos = (pos + 1) & 255U;
+        }
+        id = rgbIDs[pos];
+        alpha = (unsigned int)(p->c.a - alphaMin[id]) * alphaBuckets /
+                (alphaMax[id] - alphaMin[id] + 1);
+        entry = id * alphaBuckets + MIN(alpha, alphaBuckets - 1);
+        indices[i] = entry;
+
+        bucket = &buckets[entry];
+        bucket->count++;
+        bucket->r += p->c.r;
+        bucket->g += p->c.g;
+        bucket->b += p->c.b;
+        bucket->a += p->c.a;
+    }
+
+    for (i = 0; i < nQuantPixels; i++) {
+        avg_color_from_color_bucket(&buckets[i], &colors[i]);
+    }
+
+    free(buckets);
+    *palette = colors;
+    *paletteLength = nQuantPixels;
+    *quantizedPixels = indices;
+    return 1;
+}
+
 int
 quantize_octree(
     Pixel *pixelData,
@@ -400,6 +519,16 @@ quantize_octree(
     long i;
     unsigned long nCoarseColors, nFineColors, nAlreadySubtracted;
     const unsigned int *cubeBits;
+    int sparse;
+
+    if (withAlpha) {
+        sparse = quantize_sparse_rgba(
+            pixelData, nPixels, nQuantPixels, palette, paletteLength, quantizedPixels
+        );
+        if (sparse) {
+            return sparse > 0;
+        }
+    }
 
     if (withAlpha) {
         cubeBits = CUBE_LEVELS_ALPHA;
