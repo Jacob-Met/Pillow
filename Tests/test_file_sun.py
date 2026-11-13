@@ -72,6 +72,42 @@ def test_unsupported_file_type() -> None:
             pass
 
 
+@pytest.mark.parametrize(
+    "depth, width, first, second",
+    (
+        (1, 1, b"\x40", b"\x20"),
+        (4, 1, b"\xa0", b"\x50"),
+        (8, 3, b"\x10\x20\x30", b"\x40\x50\x60"),
+        (24, 1, b"\x10\x20\x30", b"\x40\x50\x60"),
+    ),
+)
+def test_rle_padded_rows(
+    depth: int, width: int, first: bytes, second: bytes
+) -> None:
+    stride = ((width * depth + 15) // 16) * 2
+    raw = first.ljust(stride, b"\0") + second.ljust(stride, b"\0")
+
+    def sun_image(file_type: int, data: bytes) -> Image.Image:
+        header = b"".join(
+            _binary.o32be(value)
+            for value in (0x59A66A95, width, 2, depth, len(data), file_type, 0, 0)
+        )
+        return Image.open(io.BytesIO(header + data))
+
+    with sun_image(1, raw) as original, sun_image(2, raw) as encoded:
+        assert encoded.mode == original.mode
+        assert list(encoded.getdata()) == list(original.getdata())
+
+
+def test_rle_run_crosses_padded_row_boundary() -> None:
+    header = b"".join(
+        _binary.o32be(value)
+        for value in (0x59A66A95, 3, 2, 8, 3, 2, 0, 0)
+    )
+    with Image.open(io.BytesIO(header + b"\x80\x07\x10")) as im:
+        assert list(im.getdata()) == [16] * 6
+
+
 @pytest.mark.skipif(
     not os.path.exists(EXTRA_DIR), reason="Extra image files not installed"
 )

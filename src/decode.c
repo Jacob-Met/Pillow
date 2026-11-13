@@ -731,7 +731,12 @@ PyImaging_SunRleDecoderNew(PyObject *self, PyObject *args) {
     ImagingDecoderObject *decoder;
 
     char *mode_name, *rawmode_name;
-    if (!PyArg_ParseTuple(args, "ss", &mode_name, &rawmode_name)) {
+    int stride = 0;
+    if (!PyArg_ParseTuple(args, "ss|i", &mode_name, &rawmode_name, &stride)) {
+        return NULL;
+    }
+    if (stride < 0) {
+        PyErr_SetString(PyExc_ValueError, "stride must not be negative");
         return NULL;
     }
 
@@ -747,6 +752,7 @@ PyImaging_SunRleDecoderNew(PyObject *self, PyObject *args) {
         return NULL;
     }
 
+    decoder->state.bytes = stride;
     decoder->decode = ImagingSunRleDecode;
 
     return (PyObject *)decoder;

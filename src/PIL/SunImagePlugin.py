@@ -128,7 +128,7 @@ class SunImageFile(ImageFile.ImageFile):
         if file_type in (0, 1, 3, 4, 5):
             self.tile = [ImageFile._Tile("raw", None, offset, (rawmode, stride))]
         elif file_type == 2:
-            self.tile = [ImageFile._Tile("sun_rle", None, offset, rawmode)]
+            self.tile = [ImageFile._Tile("sun_rle", None, offset, (rawmode, stride))]
         else:
             msg = "Unsupported Sun Raster file type"
             raise SyntaxError(msg)

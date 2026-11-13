@@ -54,6 +54,13 @@ Two new image processing operations are available in ImageOps.
 Other changes
 =============
 
+Sun raster RLE scanline alignment
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Run-length-encoded Sun raster images with odd-length pixel rows now decode
+without shifting subsequent rows. The decoder reads each row's 16-bit-aligned
+padding before advancing to the next scanline, matching uncompressed Sun rasters.
+
 RGBA fast octree quantization preserves alpha gradients
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
