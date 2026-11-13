@@ -498,6 +498,84 @@ quantize_sparse_rgba(
     return 1;
 }
 
+/*
+Preserve colors exactly when an RGBA image already fits the requested
+palette. The octree's fixed color buckets otherwise merge distinct colors,
+even when fewer than 256 colors occur in the entire image.
+
+The 512-slot open-addressed table stores at most 256 colors, so lookups and
+output mapping remain linear in the number of pixels.
+*/
+static int
+quantize_exact_rgba(
+    Pixel *pixelData,
+    uint32_t nPixels,
+    uint32_t nQuantPixels,
+    Pixel **palette,
+    uint32_t *paletteLength,
+    uint32_t **quantizedPixels
+) {
+    uint32_t keys[512];
+    unsigned char used[512] = {0};
+    unsigned short slots[512];
+    Pixel colors[256];
+    uint32_t *indices = NULL;
+    Pixel *resultPalette = NULL;
+    unsigned int count = 0;
+    uint32_t i;
+
+    if (!nPixels || !nQuantPixels || nQuantPixels > 256) {
+        return 0;
+    }
+
+    for (i = 0; i < nPixels; i++) {
+        Pixel *p = &pixelData[i];
+        uint32_t key = ((uint32_t)p->c.r << 24) |
+                       ((uint32_t)p->c.g << 16) |
+                       ((uint32_t)p->c.b << 8) | (uint32_t)p->c.a;
+        unsigned int pos = (key * 2654435761U) >> 23;
+        while (used[pos] && keys[pos] != key) {
+            pos = (pos + 1) & 511U;
+        }
+        if (!used[pos]) {
+            if (count >= nQuantPixels) {
+                return 0;
+            }
+            used[pos] = 1;
+            keys[pos] = key;
+            slots[pos] = count;
+            colors[count++] = *p;
+        }
+    }
+
+    /* calloc protects against oversized images and keeps allocation checks. */
+    indices = calloc(nPixels, sizeof(uint32_t));
+    resultPalette = calloc(count, sizeof(Pixel));
+    if (!indices || !resultPalette) {
+        free(indices);
+        free(resultPalette);
+        return -1;
+    }
+    memcpy(resultPalette, colors, count * sizeof(Pixel));
+
+    for (i = 0; i < nPixels; i++) {
+        Pixel *p = &pixelData[i];
+        uint32_t key = ((uint32_t)p->c.r << 24) |
+                       ((uint32_t)p->c.g << 16) |
+                       ((uint32_t)p->c.b << 8) | (uint32_t)p->c.a;
+        unsigned int pos = (key * 2654435761U) >> 23;
+        while (keys[pos] != key) {
+            pos = (pos + 1) & 511U;
+        }
+        indices[i] = slots[pos];
+    }
+
+    *palette = resultPalette;
+    *paletteLength = count;
+    *quantizedPixels = indices;
+    return 1;
+}
+
 int
 quantize_octree(
     Pixel *pixelData,
@@ -522,6 +600,12 @@ quantize_octree(
     int sparse;
 
     if (withAlpha) {
+        sparse = quantize_exact_rgba(
+            pixelData, nPixels, nQuantPixels, palette, paletteLength, quantizedPixels
+        );
+        if (sparse) {
+            return sparse > 0;
+        }
         sparse = quantize_sparse_rgba(
             pixelData, nPixels, nQuantPixels, palette, paletteLength, quantizedPixels
         );

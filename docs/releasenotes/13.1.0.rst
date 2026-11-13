@@ -61,6 +61,14 @@ Run-length-encoded Sun raster images with odd-length pixel rows now decode
 without shifting subsequent rows. The decoder reads each row's 16-bit-aligned
 padding before advancing to the next scanline, matching uncompressed Sun rasters.
 
+RGBA palette quantization preserves colors that already fit
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+RGBA images with at most the requested number of colors now retain every
+distinct RGBA color when quantized with FASTOCTREE. Previously, fixed
+octree buckets could merge dozens of distinct colors even when all of them
+fit into a GIF palette, causing avoidable banding.
+
 RGBA fast octree quantization preserves alpha gradients
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

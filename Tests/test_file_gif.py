@@ -313,6 +313,43 @@ def test_roundtrip_other_alpha_modes(tmp_path: Path, mode: str) -> None:
         assert_image_similar(reread.convert("RGB"), hopper(), 15)
 
 
+@pytest.mark.parametrize("distinct", [12, 147, 253, 256])
+def test_rgba_gif_preserves_existing_palette_colors(distinct: int) -> None:
+    image = Image.new("RGBA", (distinct, 2))
+    image.putdata([(i, i, i, 255) for i in range(distinct)] * 2)
+
+    buffer = BytesIO()
+    image.save(buffer, format="GIF")
+    buffer.seek(0)
+
+    with Image.open(buffer) as saved:
+        assert saved.convert("RGBA").tobytes() == image.tobytes()
+
+
+def test_rgba_gif_animation_preserves_distinct_frame_palettes() -> None:
+    first = Image.new("RGBA", (253, 1))
+    second = Image.new("RGBA", (253, 1))
+    first.putdata([(i, i, i, 255) for i in range(253)])
+    second.putdata([(i, 0, 255 - i, 255) for i in range(253)])
+
+    buffer = BytesIO()
+    first.save(
+        buffer,
+        format="GIF",
+        save_all=True,
+        append_images=[second],
+        disposal=2,
+        optimize=False,
+    )
+    buffer.seek(0)
+
+    with Image.open(buffer) as saved:
+        assert saved.n_frames == 2
+        for i, expected in enumerate((first, second)):
+            saved.seek(i)
+            assert saved.convert("RGBA").tobytes() == expected.tobytes()
+
+
 def test_roundtrip_save_all(tmp_path: Path) -> None:
     # Single frame image
     out = tmp_path / "temp.gif"

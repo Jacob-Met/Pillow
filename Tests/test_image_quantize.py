@@ -68,6 +68,30 @@ def test_rgba_fast_octree_alpha_gradients(colors: int) -> None:
     assert len(set(quantized.tobytes())) == colors
 
 
+@pytest.mark.parametrize("distinct", [1, 2, 12, 147, 253, 256])
+def test_rgba_fast_octree_exact_colors(distinct: int) -> None:
+    # Exact palette mapping must beat coarse octree buckets when all colors fit.
+    colors = [(i, i, i, 255) for i in range(distinct)]
+    image = Image.new("RGBA", (distinct, 2))
+    image.putdata(colors * 2)
+
+    quantized = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+    assert quantized.convert("RGBA").tobytes() == image.tobytes()
+    assert len(set(quantized.tobytes())) == distinct
+
+
+def test_rgba_fast_octree_exact_transparency() -> None:
+    colors = [
+        ((i * 53) % 256, (i * 79) % 256, (i * 101) % 256, i)
+        for i in range(256)
+    ]
+    image = Image.new("RGBA", (256, 1))
+    image.putdata(colors)
+
+    quantized = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+    assert quantized.convert("RGBA").tobytes() == image.tobytes()
+
+
 def test_rgba_fast_octree_many_rgb_channel_values() -> None:
     """A handful of colors with varied channels still needs alpha detail."""
     base_colors = [
