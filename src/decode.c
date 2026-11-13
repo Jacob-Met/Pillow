@@ -823,7 +823,16 @@ PyImaging_ZipDecoderNew(PyObject *self, PyObject *args) {
 
     char *mode_name, *rawmode_name;
     int interlaced = 0;
-    if (!PyArg_ParseTuple(args, "ss|i", &mode_name, &rawmode_name, &interlaced)) {
+    unsigned int trns_red = 0, trns_green = 0, trns_blue = 0;
+    if (!PyArg_ParseTuple(
+            args, "ss|iIII", &mode_name, &rawmode_name, &interlaced,
+            &trns_red, &trns_green, &trns_blue
+        )) {
+        return NULL;
+    }
+    if (PyTuple_GET_SIZE(args) == 6 &&
+        (trns_red > 65535 || trns_green > 65535 || trns_blue > 65535)) {
+        PyErr_SetString(PyExc_ValueError, "16-bit transparency key out of range");
         return NULL;
     }
 
@@ -842,7 +851,16 @@ PyImaging_ZipDecoderNew(PyObject *self, PyObject *args) {
     decoder->decode = ImagingZipDecode;
     decoder->cleanup = ImagingZipDecodeCleanup;
 
-    ((ZIPSTATE *)decoder->state.context)->interlaced = interlaced;
+    ZIPSTATE *context = (ZIPSTATE *)decoder->state.context;
+    context->interlaced = interlaced;
+    if (PyTuple_GET_SIZE(args) == 6) {
+        const unsigned int key[] = {trns_red, trns_green, trns_blue};
+        context->has_trns16_rgb = 1;
+        for (int i = 0; i < 3; i++) {
+            context->trns16_rgb[2 * i] = (UINT8)(key[i] >> 8);
+            context->trns16_rgb[2 * i + 1] = (UINT8)key[i];
+        }
+    }
 
     return (PyObject *)decoder;
 }

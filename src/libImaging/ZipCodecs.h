@@ -52,6 +52,8 @@ typedef struct {
     int prefix; /* size of filter prefix (0 for TIFF data) */
 
     int interlaced; /* is the image interlaced? (PNG) */
+    int has_trns16_rgb; /* full-precision transparency for 16-bit RGB PNG */
+    UINT8 trns16_rgb[6];
 
     int pass; /* current pass of the interlaced image (PNG) */
 

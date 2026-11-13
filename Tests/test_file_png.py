@@ -533,6 +533,52 @@ class TestFilePng:
             with Image.open(pngfile):
                 pass
 
+    @pytest.mark.parametrize("interlaced", [False, True])
+    @pytest.mark.parametrize(
+        "other",
+        [
+            (0x3434, 0x7878, 0xBCBC),  # Matches the key's low bytes.
+            (0x1235, 0x5678, 0x9ABC),  # Matches the key's high bytes.
+        ],
+    )
+    @pytest.mark.parametrize("key_second", [False, True])
+    def test_16bit_rgb_trns_exact_key(
+        self, interlaced: bool, other: tuple[int, int, int], key_second: bool
+    ) -> None:
+        import struct
+
+        key = (0x1234, 0x5678, 0x9ABC)
+        pixels = (other, key) if key_second else (key, other)
+        rows = (
+            b"\x00"
+            + struct.pack(">3H", *pixels[0])
+            + b"\x00"
+            + struct.pack(">3H", *pixels[1])
+            if interlaced
+            else b"\x00" + struct.pack(">6H", *pixels[0], *pixels[1])
+        )
+        data = (
+            MAGIC
+            + chunk(
+                b"IHDR",
+                o32(2),
+                o32(1),
+                b"\x10\x02\x00\x00",
+                b"\x01" if interlaced else b"\x00",
+            )
+            + chunk(b"tRNS", struct.pack(">3H", *key))
+            + chunk(b"IDAT", zlib.compress(rows))
+            + IEND
+        )
+        with load(data) as im:
+            assert im.mode == "RGBA"
+            assert [im.getpixel((x, 0))[3] for x in range(2)] == (
+                [255, 0] if key_second else [0, 255]
+            )
+            assert [im.getpixel((x, 0))[:3] for x in range(2)] == [
+                tuple(value >> 8 for value in pixel) for pixel in pixels
+            ]
+
     def test_trns_rgb(self) -> None:
         # Check writing and reading of tRNS chunks for RGB images.
         # Independent file sample provided by Sebastian Spaeth.

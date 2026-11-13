@@ -214,11 +214,12 @@ ImagingZipDecode(Imaging im, ImagingCodecState state, UINT8 *buf, Py_ssize_t byt
             if (state->bits >= 8) {
                 /* Stuff pixels in their correct location, one by one */
                 for (i = 0; i < row_len; i += ((state->bits + 7) / 8)) {
-                    state->shuffle(
-                        (UINT8 *)im->image[state->y] + col * im->pixelsize,
-                        state->buffer + context->prefix + i,
-                        1
-                    );
+                    UINT8 *dst = (UINT8 *)im->image[state->y] + col * im->pixelsize;
+                    const UINT8 *src = state->buffer + context->prefix + i;
+                    state->shuffle(dst, src, 1);
+                    if (context->has_trns16_rgb) {
+                        dst[3] = memcmp(src, context->trns16_rgb, 6) == 0 ? 0 : 255;
+                    }
                     col += COL_INCREMENT[context->pass];
                 }
             } else {
@@ -251,12 +252,16 @@ ImagingZipDecode(Imaging im, ImagingCodecState state, UINT8 *buf, Py_ssize_t byt
                 memset(state->buffer, 0, state->bytes + 1);
             }
         } else {
-            state->shuffle(
-                (UINT8 *)im->image[state->y + state->yoff] +
-                    state->xoff * im->pixelsize,
-                state->buffer + context->prefix,
-                state->xsize
-            );
+            UINT8 *dst = (UINT8 *)im->image[state->y + state->yoff] +
+                         state->xoff * im->pixelsize;
+            const UINT8 *src = state->buffer + context->prefix;
+            state->shuffle(dst, src, state->xsize);
+            if (context->has_trns16_rgb) {
+                for (i = 0; i < state->xsize; i++) {
+                    dst[i * im->pixelsize + 3] =
+                        memcmp(src + i * 6, context->trns16_rgb, 6) == 0 ? 0 : 255;
+                }
+            }
             state->y++;
         }
 
