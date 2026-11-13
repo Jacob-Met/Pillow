@@ -324,7 +324,8 @@ class TestFilePng:
 
         # check if saved image contains same transparency
         with Image.open(test_file) as im:
-            assert len(im.info["transparency"]) == 256
+            # An exact single-color palette needs only one transparent entry.
+            assert im.info["transparency"] == 0
             assert_image(im, "P", (10, 10))
             im = im.convert("RGBA")
         assert_image(im, "RGBA", (10, 10))
