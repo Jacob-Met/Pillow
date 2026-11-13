@@ -1772,3 +1772,65 @@ def test_incorrectly_ordered_coordinates(xy: tuple[int, int, int, int]) -> None:
         draw.rectangle(xy)
     with pytest.raises(ValueError):
         draw.rounded_rectangle(xy)
+
+
+@pytest.mark.parametrize(
+    "kind, points, width",
+    [
+        ("point", [(-0.6, 2.5)], 1),
+        ("line", [(-0.6, 2.5), (-0.6, 9)], 1),
+        ("line", [(-1.6, 2), (-1.6, 9)], 3),
+        ("joint", [(-4, 9), (0, 3), (-12, 4)], 7),
+        ("polygon", [(-0.9, 2), (-0.2, 2), (-0.2, 8), (-0.9, 8)], 1),
+        ("polygon", [(-4, 8), (-9, 13), (9, 2)], 1),
+        (
+            "polygon",
+            [(27.5, -25.5), (-15.5, -2.25), (-18.25, -13.25), (15.75, 14)],
+            7,
+        ),
+        ("rectangle", (-10.5, 2.5, 15.5, 25.5), 2),
+        ("rounded_rectangle", (-10.5, 2.5, 15.5, 25.5), 3),
+        ("ellipse", (-8.25, -5.5, 20.5, 18.25), 3),
+        ("arc", (-8.25, -5.5, 20.5, 18.25), 3),
+        ("pieslice", (-8.25, -5.5, 20.5, 18.25), 3),
+        ("chord", (-8.25, -5.5, 20.5, 18.25), 3),
+    ],
+)
+@pytest.mark.parametrize("dx, dy", [(63, 0), (0, 63), (63, 63)])
+def test_draw_translation_invariance(
+    kind: str,
+    points: list[tuple[float, float]] | tuple[float, float, float, float],
+    width: int,
+    dx: int,
+    dy: int,
+) -> None:
+    # A map tile must match the same geometry drawn with a margin and cropped.
+    def render(tx: int, ty: int) -> bytes:
+        im = Image.new("L", (103, 103))
+        draw = ImageDraw.Draw(im)
+        if kind in ("point", "line", "joint", "polygon"):
+            xy = [(x + tx, y + ty) for x, y in points]
+        else:
+            xy = tuple(
+                value + (tx if i % 2 == 0 else ty)
+                for i, value in enumerate(points)
+            )
+        if kind == "point":
+            draw.point(xy, fill=255)
+        elif kind == "line":
+            draw.line(xy, fill=255, width=width)
+        elif kind == "joint":
+            draw.line(xy, fill=255, width=width, joint="curve")
+        elif kind == "polygon":
+            draw.polygon(xy, fill=255, outline=255, width=width)
+        elif kind == "rounded_rectangle":
+            draw.rounded_rectangle(xy, radius=5, fill=255, outline=255, width=width)
+        elif kind == "arc":
+            draw.arc(xy, 30, 240, fill=255, width=width)
+        elif kind in ("pieslice", "chord"):
+            getattr(draw, kind)(xy, 30, 240, fill=255, outline=255, width=width)
+        else:
+            getattr(draw, kind)(xy, fill=255, outline=255, width=width)
+        return im.crop((tx, ty, tx + 40, ty + 40)).tobytes()
+
+    assert render(0, 0) == render(dx, dy)

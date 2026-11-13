@@ -60,12 +60,10 @@ ink16(Imaging im, const void *ink_) {
     }
 }
 
-/*
- * Rounds around zero (up=away from zero, down=towards zero)
- * This guarantees that ROUND_UP|DOWN(f) == -ROUND_UP|DOWN(-f)
- */
-#define ROUND_UP(f) ((int)((f) >= 0.0 ? floor((f) + 0.5F) : -floor(fabs(f) + 0.5F)))
-#define ROUND_DOWN(f) ((int)((f) >= 0.0 ? ceil((f) - 0.5F) : -ceil(fabs(f) - 0.5F)))
+/* Consistent pixel-center rounding, including across negative coordinates. */
+#define ROUND_UP(f) ((int)floor((f) + 0.5))
+#define ROUND_DOWN(f) ((int)ceil((f) - 0.5))
+#define ROUND_HALF_UP(f) floor((f) + 0.5)
 
 /* -------------------------------------------------------------------- */
 /* Primitives                                                           */
@@ -74,10 +72,21 @@ ink16(Imaging im, const void *ink_) {
 typedef struct {
     /* edge descriptor for polygon engine */
     int d;
-    int x0, y0;
+    int x0, y0, x1, y1;
     int xmin, ymin, xmax, ymax;
-    float dx;
 } Edge;
+
+static inline double
+edge_x_at_y(const Edge *edge, int y) {
+    if (edge->y0 == edge->y1) {
+        return edge->x0;
+    }
+    /* Divide only after multiplying integer distances. Precomputed floating
+       slopes can move an exact half-pixel crossing when the shape is shifted. */
+    return edge->x0 +
+           ((double)(y - edge->y0) * (edge->x1 - edge->x0)) /
+               (edge->y1 - edge->y0);
+}
 
 typedef void (*point_handler)(Imaging, int, int, int);
 
@@ -316,7 +325,7 @@ line(
 
 static int
 x_cmp(const void *x0, const void *x1) {
-    float diff = *((float *)x0) - *((float *)x1);
+    double diff = *((double *)x0) - *((double *)x1);
     if (diff < 0) {
         return -1;
     } else if (diff > 0) {
@@ -371,12 +380,12 @@ polygon_generic(
     Imaging im, int n, Edge *e, int ink, int eofill, hline_handler hline, Imaging mask
 ) {
     Edge **edge_table;
-    float *xx;
+    double *xx;
     int edge_count = 0;
     int ymin = im->ysize - 1;
     int ymax = 0;
     int i, j, k;
-    float adjacent_line_x, adjacent_line_x_other_edge;
+    double adjacent_line_x, adjacent_line_x_other_edge;
 
     if (n <= 0) {
         return 0;
@@ -414,7 +423,7 @@ polygon_generic(
 
     /* Process the edge table with a scan line searching for intersections */
     /* malloc check ok, using calloc */
-    xx = calloc(edge_count * 2, sizeof(float));
+    xx = calloc(edge_count * 2, sizeof(double));
     if (!xx) {
         free(edge_table);
         return -1;
@@ -424,43 +433,40 @@ polygon_generic(
         for (i = 0; i < edge_count; i++) {
             Edge *current = edge_table[i];
             if (ymin >= current->ymin && ymin <= current->ymax) {
-                xx[j++] = (ymin - current->y0) * current->dx + current->x0;
+                xx[j++] = edge_x_at_y(current, ymin);
 
                 if (ymin == current->ymax && ymin < ymax) {
                     // Needed to draw consistent polygons
                     xx[j] = xx[j - 1];
                     j++;
                 } else if (
-                    (ymin == current->ymin || ymin == current->ymax) && current->dx != 0
+                    (ymin == current->ymin || ymin == current->ymax) && current->x0 != current->x1
                 ) {
                     // Connect discontiguous corners
                     for (k = 0; k < i; k++) {
                         Edge *other_edge = edge_table[k];
                         if ((ymin != other_edge->ymin && ymin != other_edge->ymax) ||
-                            other_edge->dx == 0) {
+                            other_edge->x0 == other_edge->x1) {
                             continue;
                         }
                         // Check if the two edges join to make a corner
-                        if (roundf(xx[j - 1]) ==
-                            roundf(
-                                (ymin - other_edge->y0) * other_edge->dx +
-                                other_edge->x0
+                        if (ROUND_HALF_UP(xx[j - 1]) ==
+                            ROUND_HALF_UP(
+                                edge_x_at_y(other_edge, ymin)
                             )) {
                             // Determine points from the edges on the next row
                             // Or if this is the last row, check the previous row
                             int offset = ymin == current->ymax ? -1 : 1;
                             adjacent_line_x =
-                                (ymin + offset - current->y0) * current->dx +
-                                current->x0;
+                                edge_x_at_y(current, ymin + offset);
                             if (ymin + offset >= other_edge->ymin &&
                                 ymin + offset <= other_edge->ymax) {
                                 adjacent_line_x_other_edge =
-                                    (ymin + offset - other_edge->y0) * other_edge->dx +
-                                    other_edge->x0;
+                                    edge_x_at_y(other_edge, ymin + offset);
                                 if (xx[j - 1] > adjacent_line_x + 1 &&
                                     xx[j - 1] > adjacent_line_x_other_edge + 1) {
                                     xx[j - 1] =
-                                        roundf(fmax(
+                                        ROUND_HALF_UP(fmax(
                                             adjacent_line_x, adjacent_line_x_other_edge
                                         )) +
                                         1;
@@ -469,7 +475,7 @@ polygon_generic(
                                     xx[j - 1] < adjacent_line_x_other_edge - 1
                                 ) {
                                     xx[j - 1] =
-                                        roundf(fmin(
+                                        ROUND_HALF_UP(fmin(
                                             adjacent_line_x, adjacent_line_x_other_edge
                                         )) -
                                         1;
@@ -481,7 +487,7 @@ polygon_generic(
                 }
             }
         }
-        qsort(xx, j, sizeof(float), x_cmp);
+        qsort(xx, j, sizeof(double), x_cmp);
         if (hasAlpha == 1) {
             int x_pos = j == 0 ? -1 : 0;
             for (i = 1; i < j; i += 2) {
@@ -538,18 +544,14 @@ add_edge(Edge *e, int x0, int y0, int x1, int y1) {
 
     if (y0 == y1) {
         e->d = 0;
-        e->dx = 0.0;
     } else {
-        e->dx = ((float)(x1 - x0)) / (y1 - y0);
-        if (y0 == e->ymin) {
-            e->d = 1;
-        } else {
-            e->d = -1;
-        }
+        e->d = y0 == e->ymin ? 1 : -1;
     }
 
     e->x0 = x0;
     e->y0 = y0;
+    e->x1 = x1;
+    e->y1 = y1;
 }
 
 typedef struct {
@@ -1088,10 +1090,10 @@ clip_tree_do_clip(
             // X of intersection
             double ix = -(B * y + C) / A;
             if (A * x0 + B * y + C < eps) {
-                x0 = lround(fmax(x0, ix));
+                x0 = ROUND_HALF_UP(fmax(x0, ix));
             }
             if (A * x1 + B * y + C < eps) {
-                x1 = lround(fmin(x1, ix));
+                x1 = ROUND_HALF_UP(fmin(x1, ix));
             }
         }
         if (x0 <= x1) {
@@ -1699,7 +1701,7 @@ ImagingDrawPieslice(
         if (pieSideNew(im, x0, y0, x1, y1, end, ink, width, op)) {
             return -1;
         }
-        int xc = lround((x0 + x1 - width) / 2.0), yc = lround((y0 + y1 - width) / 2.0);
+        int xc = ROUND_HALF_UP((x0 + x1 - width) / 2.0), yc = ROUND_HALF_UP((y0 + y1 - width) / 2.0);
         ellipseNew(im, xc, yc, xc + width - 1, yc + width - 1, ink, 1, 0, op);
         return pieNew(im, x0, y0, x1, y1, start, end, ink, width, op);
     }
@@ -1800,7 +1802,7 @@ ImagingOutlineLine(ImagingOutline outline, float x1, float y1) {
         return -1; /* out of memory */
     }
 
-    add_edge(e, (int)outline->x, (int)outline->y, (int)x1, (int)y1);
+    add_edge(e, FLOOR(outline->x), FLOOR(outline->y), FLOOR(x1), FLOOR(y1));
 
     outline->x = x1;
     outline->y = y1;
@@ -1840,7 +1842,7 @@ ImagingOutlineCurve(
         float x = outline->x * u3 + 3 * (x1 * t * u2 + x2 * t2 * u) + x3 * t3 + 0.5;
         float y = outline->y * u3 + 3 * (y1 * t * u2 + y2 * t2 * u) + y3 * t3 + 0.5;
 
-        add_edge(e++, xo, yo, (int)x, (int)y);
+        add_edge(e++, FLOOR(xo), FLOOR(yo), FLOOR(x), FLOOR(y));
 
         xo = x, yo = y;
     }
@@ -1903,10 +1905,10 @@ ImagingOutlineTransform(ImagingOutline outline, double a[6]) {
            upgrade your compiler (make sure you have the right service
            pack) */
 
-        X0 = (int)(a0 * x0 + a1 * y0 + a2);
-        Y0 = (int)(a3 * x0 + a4 * y0 + a5);
-        X1 = (int)(a0 * x1 + a1 * y1 + a2);
-        Y1 = (int)(a3 * x1 + a4 * y1 + a5);
+        X0 = FLOOR(a0 * x0 + a1 * y0 + a2);
+        Y0 = FLOOR(a3 * x0 + a4 * y0 + a5);
+        X1 = FLOOR(a0 * x1 + a1 * y1 + a2);
+        Y1 = FLOOR(a3 * x1 + a4 * y1 + a5);
 
         add_edge(eOut, X0, Y0, X1, Y1);
 

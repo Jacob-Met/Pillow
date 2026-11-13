@@ -54,6 +54,14 @@ Two new image processing operations are available in ImageOps.
 Other changes
 =============
 
+ImageDraw shapes no longer shift at negative tile boundaries
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Drawing primitives now use consistent coordinate and edge rounding across
+positive and negative coordinates. Shapes extending outside an image can
+be rendered directly into separate map tiles without producing different
+edge pixels compared with a shifted and cropped full drawing.
+
 Sun raster RLE scanline alignment
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

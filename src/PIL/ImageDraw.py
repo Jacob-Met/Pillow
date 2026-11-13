@@ -418,10 +418,10 @@ class ImageDraw:
 
         d = min(x1 - x0, y1 - y0, radius * 2)
 
-        x0 = round(x0)
-        y0 = round(y0)
-        x1 = round(x1)
-        y1 = round(y1)
+        x0 = math.floor(x0 + 0.5)
+        y0 = math.floor(y0 + 0.5)
+        x1 = math.floor(x1 + 0.5)
+        y1 = math.floor(y1 + 0.5)
         full_x, full_y = False, False
         if all(corners):
             full_x = d >= x1 - x0 - 1
@@ -589,8 +589,8 @@ class ImageDraw:
                 mode = self.fontmode
                 if stroke_width == 0 and image_text.embedded_color:
                     mode = "RGBA"
-                x = int(line.x)
-                y = int(line.y)
+                x = math.floor(line.x)
+                y = math.floor(line.y)
                 start = (math.modf(line.x)[0], math.modf(line.y)[0])
                 if isinstance(image_text.font, ImageFont.FreeTypeFont):
                     mask, offset = image_text.font.getmask2(
