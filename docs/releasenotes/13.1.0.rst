@@ -54,6 +54,15 @@ Two new image processing operations are available in ImageOps.
 Other changes
 =============
 
+RGBA fast octree quantization preserves alpha gradients
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When reducing RGBA images with a small number of RGB colors and many
+transparency levels, :py:meth:`~PIL.Image.Image.quantize` with
+``Quantize.FASTOCTREE`` now allocates palette entries across the alpha gradient.
+Previously, its fixed color buckets could collapse hundreds of distinct alpha
+levels into a handful of colors, producing visible banding.
+
 Scaling empty text
 ^^^^^^^^^^^^^^^^^^
 
